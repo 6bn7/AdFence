@@ -4,8 +4,11 @@ on:
   push:
     branches: [ main, master ]
     tags: [ 'v*' ]
-  pull_request:
   workflow_dispatch:
+
+# 审计 N-4：构建任务不需要写权限
+permissions:
+  contents: read
 
 jobs:
   apk:
@@ -25,13 +28,28 @@ jobs:
       - name: Install build-tools
         run: sdkmanager "build-tools;34.0.0" "platforms;android-34"
 
-      - name: Build (unsigned keystore is generated automatically)
+      - name: Build
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
-          KEYSTORE_PASS: ci-only-not-a-secret
+          # 审计 N-4：发布密钥来自仓库 Secrets，绝不写进仓库。
+          # 配置方法见 README「发布新版本」。未配置时本次产物使用一次性密钥，
+          # 只能用于自测，不能用于发布（否则用户无法升级、也无法核对签名指纹）。
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
         run: |
           chmod +x build.sh
+          mkdir -p keystore
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > keystore/release.keystore
+            printf '%s\n' "$KEYSTORE_PASS" > keystore/.pass
+            echo "== 使用 Secrets 中的持久发布密钥 =="
+          else
+            printf '%s\n' "ci-ephemeral-key-not-for-release" > keystore/.pass
+            echo "::warning::未配置 ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASS，本次产物使用一次性密钥，不能用于公开发布"
+          fi
           ./build.sh
+          echo "== APK 签名指纹（请与 README 中公布的指纹核对）=="
+          "$ANDROID_SDK_ROOT"/build-tools/*/apksigner verify --print-certs build/adfence.apk | grep -i "SHA-256" || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

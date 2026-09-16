@@ -42,7 +42,9 @@ public class ConfigActivity extends Activity {
 
         TextView h2 = head("上游 DNS");
         TextView d2 = desc("命中的域名会被拦，其余查询原样转发给这台解析器。\n"
-                + "默认 223.5.5.5（阿里公共 DNS）。可换成本地/自建解析器，例如 192.168.1.1。");
+                + "默认 223.5.5.5（阿里公共 DNS）。可换成本地/自建解析器，例如 192.168.1.1。\n"
+                + "⚠ 只能填 IPv4 地址。填域名（如 dns.google）会导致自递归："
+                + "系统要解析它 → 解析走回本应用 → 层层占用转发线程，最终让全机 DNS 变慢甚至丢包。");
 
         dnsBox = box(Config.upstreamDns, InputType.TYPE_TEXT_VARIATION_URI, "223.5.5.5");
 
@@ -52,6 +54,14 @@ public class ConfigActivity extends Activity {
         save.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                String dns = dnsBox.getText().toString().trim();
+                if (dns.length() > 0 && !Config.isIpv4(dns)) {
+                    Toast.makeText(ConfigActivity.this,
+                            "上游 DNS 只能填 IPv4 地址（例如 223.5.5.5）。\n"
+                                    + "填域名会让系统去解析它，而这个解析会走回本应用，形成自递归。",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
                 Config.save(ConfigActivity.this, pkgBox.getText().toString(), dnsBox.getText().toString());
                 Toast.makeText(ConfigActivity.this,
                         "已保存\n目标App：" + (Config.hasTarget() ? Config.targetPkg : "（未设置）")

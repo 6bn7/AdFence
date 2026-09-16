@@ -25,6 +25,8 @@ public final class Stats {
     public static final AtomicLong sampleSaved = new AtomicLong();
     /** 进回收站的文件数（删除前兜底，24 小时内可找回） */
     public static final AtomicLong trashed = new AtomicLong();
+    /** 因留副本失败而跳过的删除数（审计 N-3 的失败安全） */
+    public static final AtomicLong skipped = new AtomicLong();
 
     /**
      * 是否把「放行」的查询也写进日志文件。
@@ -93,5 +95,6 @@ public final class Stats {
         cleanBytes.set(0);
         sampleSaved.set(0);
         trashed.set(0);
+        skipped.set(0);
     }
 }

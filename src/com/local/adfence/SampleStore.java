@@ -31,11 +31,13 @@ public final class SampleStore {
     private static final long MAX_ONE = 12L * 1024 * 1024;
 
     public static File dir(Context c) {
-        return ensure(new File(c.getExternalFilesDir(null), "samples"));
+        // 审计 N-5：改放应用私有目录 —— 外部存储路径在 Android ≤10 对其他应用可读，
+        // 而回收站里的副本（可能含 .db/.cookie/.journal）本不该被别的应用看到
+        return ensure(new File(c.getFilesDir(), "samples"));
     }
 
     public static File trashDir(Context c) {
-        return ensure(new File(c.getExternalFilesDir(null), "trash"));
+        return ensure(new File(c.getFilesDir(), "trash"));
     }
 
     private static File ensure(File d) {
@@ -111,9 +113,19 @@ public final class SampleStore {
             int n = cur == null ? 0 : cur.length;
             long total = 0;
             if (cur != null) for (File f : cur) total += f.length();
+            // 审计 N-3：配额满了先淘汰最旧的，让"留一份副本"这个承诺尽量能兑现
             if (n >= maxFiles || total > maxTotal) {
-                in.close();
-                return false;
+                Arrays.sort(cur, new java.util.Comparator<File>() {
+                    public int compare(File a, File b) {
+                        return Long.compare(a.lastModified(), b.lastModified());
+                    }
+                });
+                for (File old : cur) {
+                    old.delete();
+                    total -= old.length();
+                    n--;
+                    if (n < maxFiles && total <= maxTotal) break;
+                }
             }
             OutputStream out = new FileOutputStream(dst);
             byte[] buf = new byte[1 << 16];

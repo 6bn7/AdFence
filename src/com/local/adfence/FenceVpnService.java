@@ -61,6 +61,7 @@ public class FenceVpnService extends VpnService implements Runnable {
             stopFence();
             return START_NOT_STICKY;
         }
+        restorePrefs();
         if (!running) {
             startForeground(NOTI_ID, buildNotification());
             if (!establish()) {
@@ -102,9 +103,33 @@ public class FenceVpnService extends VpnService implements Runnable {
                 Rules.libEnabled = getSharedPreferences("adfence", MODE_PRIVATE)
                         .getBoolean("libEnabled", true);
             }
-            logLine("# AdFence started, rules=" + Rules.size());
+            logLine("# AdFence started, rules=" + Rules.size()
+                    + ", upstream=" + Config.upstreamDns
+                    + ", onlyTarget=" + onlyTarget
+                    + ", autoclean=" + CacheCleaner.enabled
+                    + ", askFirst=" + CacheCleaner.askFirst);
         }
         return START_STICKY;
+    }
+
+    /**
+     * 审计 N-1：系统按 START_STICKY 重建 Service 时（进程被省电策略杀掉后），
+     * Activity 不会运行，进程内静态字段全部回到初始值。必须在这里把用户配置读回来，
+     * 否则用户显式设置的私有上游 DNS 会被静默换回公共 DNS（隐私回归），
+     * 「只抓目标App」也会静默变成过滤全部应用。
+     */
+    private void restorePrefs() {
+        try {
+            android.content.SharedPreferences sp = getSharedPreferences("adfence", MODE_PRIVATE);
+            Config.load(this);
+            onlyTarget = sp.getBoolean("onlyTarget", false);
+            Rules.libEnabled = sp.getBoolean("libEnabled", true);
+            CacheCleaner.enabled = sp.getBoolean("autoclean", true);
+            CacheCleaner.askFirst = sp.getBoolean("askFirst", true);
+            Stats.logAll = sp.getBoolean("logAll", false);
+        } catch (Throwable t) {
+            Log.w(TAG, "恢复配置失败: " + t);
+        }
     }
 
     @Override
@@ -264,14 +289,16 @@ public class FenceVpnService extends VpnService implements Runnable {
         int qEnd = nameEnd(p, dnsOff + 12, dnsOff + dnsLen);
         if (qEnd < 0 || qEnd + 4 > dnsOff + dnsLen) return;
         String qname = readName(p, dnsOff + 12, dnsOff + dnsLen);
-        if (qname == null || qname.length() == 0 || !isSafeName(qname)) return;
+        if (qname == null || qname.length() == 0 || qname.length() > 253) return;
+        // 审计 N-7：不再"拒绝含异常字符的查询"（会误伤合法 IDN），改为记录时转义
+        String logName = sanitize(qname);
         int qtype = u16(p, qEnd);
 
         int qTotal = (qEnd + 4) - (dnsOff + 12);             // 问题段长度
 
         if (Rules.isBlocked(qname)) {
-            Stats.add(qname, Stats.KIND_BLOCK);
-            logLine("BLOCK " + qname);
+            Stats.add(logName, Stats.KIND_BLOCK);
+            logLine("BLOCK " + logName);
             int anLen = (qtype == 1 || qtype == 255) ? 16 : 0;
             byte[] resp = new byte[12 + qTotal + anLen];
             resp[0] = p[dnsOff];
@@ -293,11 +320,15 @@ public class FenceVpnService extends VpnService implements Runnable {
             return;
         }
 
-        Stats.add(qname, Stats.KIND_ALLOW);
-        if (Stats.logAll) logLine("ALLOW " + qname);
+        Stats.add(logName, Stats.KIND_ALLOW);
+        if (Stats.logAll) logLine("ALLOW " + logName);
 
         // 放行：转发放到线程池异步做，读循环不再被上游超时阻塞（审计 M-4）
-        if (pool == null || inflight.get() >= MAX_INFLIGHT) return;   // 背压：超出上限直接丢弃
+        if (pool == null || inflight.get() >= MAX_INFLIGHT) {
+            // 审计 N-7：背压时回 SERVFAIL，让客户端快速失败重试，而不是干等超时
+            writeServfail(p, ihl, sport, dnsOff, qTotal);
+            return;
+        }
         final byte[] query = new byte[dnsLen];
         System.arraycopy(p, dnsOff, query, 0, dnsLen);
         final byte[] orig = new byte[ihl + 8];                // 回包只需要 IP 头 + UDP 头
@@ -322,16 +353,32 @@ public class FenceVpnService extends VpnService implements Runnable {
         }
     }
 
-    /** 名称只允许 DNS 合法字符：顺带挡掉日志注入（审计 L-2） */
-    private static boolean isSafeName(String n) {
-        if (n.length() > 253) return false;
-        for (int i = 0; i < n.length(); i++) {
+    /** 审计 L-2 / N-7：把域名转义成可安全记录的形式（防日志注入），但不影响正常解析 */
+    private static String sanitize(String n) {
+        if (n == null) return "";
+        int len = Math.min(n.length(), 253);
+        StringBuilder sb = new StringBuilder(len);
+        for (int i = 0; i < len; i++) {
             char c = n.charAt(i);
-            boolean ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-                    || c == '.' || c == '-' || c == '_';
-            if (!ok) return false;
+            if (c < 0x20 || c == 0x7f) sb.append('?');
+            else sb.append(c);
         }
-        return true;
+        return sb.toString();
+    }
+
+    /** 回一个 SERVFAIL（RCODE=2），用于背压丢弃时快速失败 */
+    private void writeServfail(byte[] p, int ihl, int sport, int dnsOff, int qTotal) {
+        try {
+            byte[] resp = new byte[12 + qTotal];
+            resp[0] = p[dnsOff];
+            resp[1] = p[dnsOff + 1];
+            put16(resp, 2, 0x8182);                  // QR=1 RD=1 RA=1 RCODE=SERVFAIL
+            put16(resp, 4, 1);
+            put16(resp, 6, 0);
+            System.arraycopy(p, dnsOff + 12, resp, 12, qTotal);
+            writeIpUdp(p, ihl, sport, resp, 0, resp.length);
+        } catch (Throwable ignored) {
+        }
     }
 
     /**
@@ -399,7 +446,8 @@ public class FenceVpnService extends VpnService implements Runnable {
         }
     }
 
-    private void logLine(String s) {
+    /** 审计 N-8：worker 线程与域名库载入线程会并发调用，FileWriter 非线程安全 → 加锁 */
+    private synchronized void logLine(String s) {
         Log.i(TAG, s);
         if (logWriter != null && logged < 50000) {
             try {

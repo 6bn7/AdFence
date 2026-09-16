@@ -1,36 +1,35 @@
-# AdFence 追加规则 —— 一行一个域名，匹配它自己 + 所有子域；# 开头是注释
-# 改完在 AdFence 里「停止拦截」再「启动拦截」生效（也可以在 App 的「拦截规则」界面直接加/删，立即生效）。
-# 路径：/sdcard/Android/data/com.local.adfence/files/rules.txt
+# 拦截规则说明（仅作参考，不是要放进手机的配置文件）
 
-# ============ 以下默认【不拦】，因为会误伤你正常要用的东西 ============
-# 要启用就删掉行首的 # 号
+> ⚠️ **注意**：早期版本会从手机外部存储的
+> `Android/data/com.local.adfence/files/rules.txt` 读取规则。
+> 该路径已在 **v2.7 移除**（外部存储上的文件在 Android ≤10 可被其他应用写入，
+> 存在"规则注入"风险）。
 
-# --- App 自家业务域（v1.7 已从内置里撤掉，曾把「运动世界校园」的功能弄坏）---
-#iydsj.com                  # 运动世界校园自己的业务域：视频/图片/发现页/隐私政策/登录风控
+## 现在怎么加规则
 
-# --- HTTPDNS：拦了能堵广告 SDK 的 IP 直连绕过，但支付宝/淘宝/高德等也在用，有 fallback ---
-#httpdns.alicdn.com
-#httpdns.bcelive.com
+**只能在 App 界面里增删**：
 
-# --- 大厂通用 API/日志：可能连累其它 App ---
-#i.snssdk.com               # 字节系 API（抖音/头条 SDK）
-#cdn-tos-cn.bytedance.net   # 字节系 CDN，可能承载正常图片
-#e.qq.com                   # 腾讯面很宽
-#g-api.kwai.com             # 快手 API，可能是快手主 App 在用
-#xlog.jd.com                # 京东埋点
-#mobileservice.cn           # 面太宽（内置只留了 zxid.mobileservice.cn / zxid-m.mobileservice.cn）
+1. 打开 AdFence → **「拦截规则（加/删/例外）」**
+2. 输入域名（例如 `ads.example.com`）→ 选：
+   - **加拦截** —— 命中即解析为 `0.0.0.0`
+   - **加例外(放行)** —— 优先级最高，用来恢复被误拦的正常域名
+   - **删除** —— 从规则/例外里移除
+3. 改完**立即生效**（无需重启拦截）
 
-# --- 来源日志但归属未确认（我猜是广告，但拿不出 SDK 证据，故不默认拦）---
-#hangzhoumengfa.com
-#youjingnetwork.com
-#junyimeng.com
-#hardcoresir.net
-#ndcjl.com
+更省事的做法：在**「拦截详情」**里点某条记录 → 用「标为广告 / 不是广告 → 放行」。
+这样规则是**带上下文**加的（能看到它当时跟哪些域名一起活动）。
 
-# --- 素材与内容同域名，拦了正常功能一起挂 ---
-#meituan.net                # 美团通用图片 CDN
-#pstatp.com                 # 字节通用 CDN
-#sdkoptedge.chinanetcenter.com
-#open-api.ewan.cn
+## 规则语义（供理解，不要手写配置文件）
 
-# ============ 想加自己的域名，直接写在下面 ============
+- 匹配方式：**按域名后缀匹配**，`example.com` 会同时命中 `a.example.com`、`b.a.example.com`
+- 优先级：**例外（放行） > 自加规则 > 内置手工规则 > 内置域名库**
+- 内置域名库来自 [anti-AD](https://github.com/privacy-protection-tools/anti-AD)（MIT），
+  可在主界面一键停用（误伤较多时的兜底开关）
+- 本应用内置的保护：一些基础服务域名默认放行，避免"拦了广告但也拦没了功能"
+
+## 不要做的事
+
+- ❌ 不要拦通用大厂域名（如 `qq.com`、`aliyuncs.com`）——会连带打死正常功能
+- ❌ 不要凭"名字像广告"就加规则——我们的教训是：**名字像广告的域名也可能承载正常业务**
+  （App 自家后端、一键登录、支付回调都可能长得很像广告域）
+- ✅ 加规则前先用「拦截详情」看看它和谁一起活动，或用「不是广告 → 放行」验证一下

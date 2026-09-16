@@ -107,12 +107,13 @@ public final class CacheCleaner {
             try {
                 tick();
                 ticks++;
-                if (ticks % 20 == 1) android.util.Log.i(FenceVpnService.TAG, "CLEAN " + probe());
+                if (ticks % 2 == 1) android.util.Log.i(FenceVpnService.TAG, "CLEAN " + probe());
             } catch (Throwable t) {
                 android.util.Log.w(FenceVpnService.TAG, "clean: " + t);
             }
             try {
-                Thread.sleep(3000);
+                // 审计 N-9：轮询从 3 秒放宽到 30 秒（清理不需要秒级响应，省电省 binder 查询）
+                Thread.sleep(30000);
             } catch (InterruptedException e) {
                 return;
             }
@@ -155,10 +156,14 @@ public final class CacheCleaner {
 
     private static void removeNow(Pend p, long[] acc) {
         try {
-            if (p.media) {
-                archive(p);                       // 图片/视频进 samples/（看原广告用）
-            } else if (!p.dir) {
-                trash(p);                         // 审计 H-3：非媒体文件先入回收站，24 小时可找回
+            // 审计 N-3：兜底失败就**不删**（失败安全）——不能让"可找回"的承诺静默失效
+            if (!p.dir) {
+                boolean backed = p.media ? archive(p) : trash(p);
+                if (!backed) {
+                    Stats.skipped.incrementAndGet();
+                    auditSkip(p);
+                    return;
+                }
             }
             if (p.dir) {
                 // 目录已收紧为「精确 SDK 目录名」或「前缀+内含 SDK 特征文件」，整树删除
@@ -175,18 +180,39 @@ public final class CacheCleaner {
         }
     }
 
-    /** 删之前留样（图片/视频），让用户能回看"原广告" */
-    private static void archive(Pend p) {
+    /** 删之前留样（图片/视频），让用户能回看"原广告"。返回 true = 已存下副本 */
+    private static boolean archive(Pend p) {
         InputStream in = Saf.open(APP, p.id);
-        if (in == null) return;
-        if (SampleStore.archiveStream(APP, p.name, in)) Stats.sampleSaved.incrementAndGet();
+        if (in == null) return false;
+        if (SampleStore.archiveStream(APP, p.name, in)) {
+            Stats.sampleSaved.incrementAndGet();
+            return true;
+        }
+        return false;
     }
 
-    /** 非媒体文件删除前先复制进回收站（审计 H-3 的"可撤销"要求） */
-    private static void trash(Pend p) {
+    /** 非媒体文件删除前先复制进回收站（审计 H-3 的"可撤销"要求）。返回 true = 已存下副本 */
+    private static boolean trash(Pend p) {
         InputStream in = Saf.open(APP, p.id);
-        if (in == null) return;
-        if (SampleStore.trashStream(APP, p.name, in)) Stats.trashed.incrementAndGet();
+        if (in == null) return false;
+        if (SampleStore.trashStream(APP, p.name, in)) {
+            Stats.trashed.incrementAndGet();
+            return true;
+        }
+        return false;
+    }
+
+    /** 留样/回收站失败 → 本次跳过删除，写进记录让用户看得见 */
+    private static void auditSkip(Pend p) {
+        try {
+            File log = new File(APP.getFilesDir(), "deleted.log");
+            OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(log, true), "UTF-8");
+            w.write(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date())
+                    + "\t跳过（留副本失败）\t" + p.size + "\t" + p.path + "\n");
+            w.close();
+        } catch (Exception ignored) {
+        }
+        android.util.Log.w(FenceVpnService.TAG, "CLEAN 跳过（留副本失败）" + p.path);
     }
 
     /** 审计留痕：时间 + 名称 + 大小 + 类型 */
@@ -240,18 +266,33 @@ public final class CacheCleaner {
         }
     }
 
+    /** 特征判定结果缓存（审计 N-9：避免每次轮询都对每个目录再发一轮子目录查询） */
+    private static final java.util.HashMap<String, long[]> SIG_CACHE = new java.util.HashMap<String, long[]>();
+    private static final long SIG_TTL = 10 * 60 * 1000L;
+
     /** 前缀命中的目录，内部还要有广告 SDK 的特征文件才算（审计 H-3 收紧前缀匹配） */
     private static boolean dirHasSdkSignature(Saf.Doc d) {
+        synchronized (SIG_CACHE) {
+            long[] hit = SIG_CACHE.get(d.id);
+            if (hit != null && System.currentTimeMillis() - hit[1] < SIG_TTL) {
+                return hit[0] == 1;
+            }
+        }
+        boolean ok = false;
         try {
             for (Saf.Doc k : Saf.children(APP, d.id)) {
                 String n = k.name == null ? "" : k.name.toLowerCase(Locale.ROOT);
-                if (n.matches(".*(" + KW + ").*")) return true;
+                if (n.matches(".*(" + KW + ").*")) { ok = true; break; }
                 if (n.equals("journal") || n.equals("cookie") || n.indexOf("kssig") >= 0
-                        || n.endsWith(".db") || n.endsWith(".apk")) return true;
+                        || n.endsWith(".db") || n.endsWith(".apk")) { ok = true; break; }
             }
         } catch (Throwable ignored) {
         }
-        return false;
+        synchronized (SIG_CACHE) {
+            if (SIG_CACHE.size() > 500) SIG_CACHE.clear();
+            SIG_CACHE.put(d.id, new long[]{ok ? 1 : 0, System.currentTimeMillis()});
+        }
+        return ok;
     }
 
     /** 收窄后的判定：宁可漏，不可误删 */

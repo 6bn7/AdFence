@@ -121,7 +121,9 @@ public class HistoryActivity extends Activity {
         section("回收站（删除的非媒体文件，24 小时内可找回）",
                 "当前 " + SampleStore.trashList(this).size() + " 个 / "
                         + CacheCleaner.fmtBytes(SampleStore.trashBytes(this))
-                        + "\n超过 24 小时会自动清除。",
+                        + "\n超过 24 小时会自动清除。"
+                        + "\n⚠ 只对**文件**有效：广告目录是整树删除、不进回收站，不可撤销（审计 N-3）。"
+                        + "\n留副本失败时会**跳过删除**（失败安全），跳过次数：" + Stats.skipped.get(),
                 "清空回收站", new Runnable() {
                     public void run() {
                         SampleStore.clearTrash(HistoryActivity.this);

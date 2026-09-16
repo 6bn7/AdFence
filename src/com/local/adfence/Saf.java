@@ -34,9 +34,13 @@ public final class Saf {
         }
     }
 
-    /** 用户授权的目录 URI（没授权返回 null） */
+    private static Uri cachedTree;
+    private static long cachedAt;
+
+    /** 用户授权的目录 URI（没授权返回 null）。结果缓存 60 秒，避免每次刷新都发起 binder 查询（审计 N-9） */
     public static Uri tree(Context c) {
         try {
+            if (cachedTree != null && System.currentTimeMillis() - cachedAt < 60000) return cachedTree;
             SharedPreferences sp = c.getSharedPreferences(SP, Context.MODE_PRIVATE);
             String s = sp.getString(KEY, null);
             if (s == null) return null;
@@ -49,6 +53,8 @@ public final class Saf {
             if (!granted) return null;
             // 实证校验：真的能读到这个目录才认（防止只有"记录"没有"权限"）
             if (!usable(c, u)) return null;
+            cachedTree = u;
+            cachedAt = System.currentTimeMillis();
             return u;
         } catch (Throwable t) {
             return null;
@@ -75,6 +81,8 @@ public final class Saf {
     }
 
     public static void save(Context c, Uri u) {
+        cachedTree = null;              // 授权变更后立即失效（审计 N-9 的缓存配套）
+        cachedAt = 0;
         try {
             c.getSharedPreferences(SP, Context.MODE_PRIVATE).edit()
                     .putString(KEY, u == null ? null : u.toString()).apply();

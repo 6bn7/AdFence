@@ -46,7 +46,31 @@ public final class Config {
 
     private static String nzDns(String s) {
         String d = nz(s);
-        return d.length() == 0 ? DEF_DNS : d;
+        if (d.length() == 0) return DEF_DNS;
+        // 审计 N-2：只接受 IPv4 字面量。填主机名会导致自递归
+        // （系统解析该主机名 → 走上游 → 又是本应用 → 池线程被层层占满）
+        return isIpv4(d) ? d : DEF_DNS;
+    }
+
+    /** 严格 IPv4 字面量校验（不接受主机名、不接受 IPv6、不接受端口） */
+    public static boolean isIpv4(String s) {
+        if (s == null) return false;
+        String t = s.trim();
+        if (t.length() < 7 || t.length() > 15) return false;
+        String[] p = t.split("\\.", -1);
+        if (p.length != 4) return false;
+        for (String x : p) {
+            if (x.length() == 0 || x.length() > 3) return false;
+            for (int i = 0; i < x.length(); i++) {
+                if (!Character.isDigit(x.charAt(i))) return false;
+            }
+            try {
+                if (Integer.parseInt(x) > 255) return false;
+            } catch (Throwable t2) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 是否设置了一个看起来有效的包名 */
@@ -59,7 +83,7 @@ public final class Config {
         String a = upstreamDns;
         String[] def = {DEF_DNS, "119.29.29.29", "180.76.76.76"};
         java.util.List<String> out = new java.util.ArrayList<String>();
-        out.add(a);
+        if (isIpv4(a)) out.add(a);                       // 审计 N-2：兜底列表同样只放合法 IP
         for (String d : def) if (!d.equals(a)) out.add(d);
         return out.toArray(new String[0]);
     }
