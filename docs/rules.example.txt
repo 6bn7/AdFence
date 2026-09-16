@@ -1,0 +1,36 @@
+# AdFence 追加规则 —— 一行一个域名，匹配它自己 + 所有子域；# 开头是注释
+# 改完在 AdFence 里「停止拦截」再「启动拦截」生效（也可以在 App 的「拦截规则」界面直接加/删，立即生效）。
+# 路径：/sdcard/Android/data/com.local.adfence/files/rules.txt
+
+# ============ 以下默认【不拦】，因为会误伤你正常要用的东西 ============
+# 要启用就删掉行首的 # 号
+
+# --- App 自家业务域（v1.7 已从内置里撤掉，曾把「运动世界校园」的功能弄坏）---
+#iydsj.com                  # 运动世界校园自己的业务域：视频/图片/发现页/隐私政策/登录风控
+
+# --- HTTPDNS：拦了能堵广告 SDK 的 IP 直连绕过，但支付宝/淘宝/高德等也在用，有 fallback ---
+#httpdns.alicdn.com
+#httpdns.bcelive.com
+
+# --- 大厂通用 API/日志：可能连累其它 App ---
+#i.snssdk.com               # 字节系 API（抖音/头条 SDK）
+#cdn-tos-cn.bytedance.net   # 字节系 CDN，可能承载正常图片
+#e.qq.com                   # 腾讯面很宽
+#g-api.kwai.com             # 快手 API，可能是快手主 App 在用
+#xlog.jd.com                # 京东埋点
+#mobileservice.cn           # 面太宽（内置只留了 zxid.mobileservice.cn / zxid-m.mobileservice.cn）
+
+# --- 来源日志但归属未确认（我猜是广告，但拿不出 SDK 证据，故不默认拦）---
+#hangzhoumengfa.com
+#youjingnetwork.com
+#junyimeng.com
+#hardcoresir.net
+#ndcjl.com
+
+# --- 素材与内容同域名，拦了正常功能一起挂 ---
+#meituan.net                # 美团通用图片 CDN
+#pstatp.com                 # 字节通用 CDN
+#sdkoptedge.chinanetcenter.com
+#open-api.ewan.cn
+
+# ============ 想加自己的域名，直接写在下面 ============

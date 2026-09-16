@@ -1,0 +1,22 @@
+# 构建产物
+build/
+*.class
+*.dex
+*.apk
+*.apks
+
+# 签名材料 —— 绝不提交！
+keystore/
+*.keystore
+*.jks
+*.p12
+*.pass
+
+# 本机/编辑器
+local.properties
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.local.adfence">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="33" />
+
+    <application
+        android:label="AdFence"
+        android:allowBackup="false"
+        android:hasCode="true">
+        <activity
+            android:name="com.local.adfence.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.local.adfence.LogActivity"
+            android:exported="false"
+            android:label="拦截详情" />
+        <activity
+            android:name="com.local.adfence.RulesActivity"
+            android:exported="false"
+            android:label="拦截规则" />
+        <activity
+            android:name="com.local.adfence.ChangelogActivity"
+            android:exported="false"
+            android:label="更新内容" />
+        <activity
+            android:name="com.local.adfence.GalleryActivity"
+            android:exported="false"
+            android:label="广告样本" />
+        <activity
+            android:name="com.local.adfence.HistoryActivity"
+            android:exported="false"
+            android:label="清理记录" />
+        <activity
+            android:name="com.local.adfence.ConfigActivity"
+            android:exported="false"
+            android:label="设置" />
+        <service
+            android:name="com.local.adfence.FenceVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
